@@ -66,16 +66,6 @@ sudo journalctl -u vk-curator-bot -f
 sudo bash deploy/harden_server.sh
 ```
 
-## Безопасность
-
-- `.env`, `credentials.json` и любые `*_secret*`, `*_token*`, `*.pem`, `*.key`
-  файлы перечислены в `.gitignore` — не уходят в коммит.
-- Все запросы к БД через ORM (SQLAlchemy) — SQL-инъекции исключены.
-- В логи не пишется содержимое сообщений и токены.
-- В systemd unit включён sandbox: `NoNewPrivileges`, `ProtectSystem=strict`,
-  `ProtectHome=tmpfs`.
-- Скрипт `deploy/harden_server.sh` настраивает UFW, fail2ban, SSH без паролей,
-  unattended-upgrades.
 
 ## Лицензия
 
