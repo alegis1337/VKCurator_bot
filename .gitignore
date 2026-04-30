@@ -1,0 +1,47 @@
+# --- Секреты (НИКОГДА не коммитить) ---
+.env
+.env.*
+!.env.example
+credentials.json
+*credentials*.json
+service-account*.json
+*.pem
+*.key
+*_token*
+*_secret*
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+venv/
+.venv/
+env/
+ENV/
+
+# --- Логи и БД-дампы ---
+*.log
+logs/
+*.sqlite
+*.sqlite3
+*.db
+dump*.sql
+backup*.sql
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+.cursor/
+.claude/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Локальные пути и временные файлы ---
+*.local
+.cache/
+tmp/

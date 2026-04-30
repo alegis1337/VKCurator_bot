@@ -1,0 +1,29 @@
+[Unit]
+Description=VK Curator Bot
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=botuser
+Group=botuser
+WorkingDirectory=/opt/vk-curator-bot
+EnvironmentFile=/opt/vk-curator-bot/.env
+ExecStart=/opt/vk-curator-bot/venv/bin/python main.py
+Restart=always
+RestartSec=10
+
+# Базовый sandboxing
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=tmpfs
+Environment=PYTHONUNBUFFERED=1
+ReadWritePaths=/opt/vk-curator-bot
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
