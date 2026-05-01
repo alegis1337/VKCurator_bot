@@ -71,7 +71,7 @@ def main() -> None:
     primary = bots[0]  # его loop_wrapper будет драйвером для всех
 
     notifier = Notifier(apis=[b.api for b in bots])
-    scheduler = build_scheduler(notifier=notifier)
+    scheduler = build_scheduler(notifier=notifier, bots=bots)
 
     async def _startup() -> None:
         logger.info("Initializing database...")

@@ -32,6 +32,9 @@ class Conversation(Base):
     title: Mapped[str | None] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Время последнего сообщения от ученика (не-куратора). Используется
+    # для решения: слать ли ежедневное напоминание про отчёт в этот чат.
+    last_student_message_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     messages: Mapped[list["Message"]] = relationship(back_populates="conversation")
 
