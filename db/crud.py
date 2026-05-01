@@ -96,6 +96,7 @@ async def save_message(
     sender_name: str | None,
     text: str | None,
     timestamp: datetime,
+    is_from_student: bool = False,
 ) -> None:
     async with async_session_factory() as session:
         msg = Message(
@@ -107,7 +108,34 @@ async def save_message(
             timestamp=timestamp,
         )
         session.add(msg)
+        # Если сообщение от ученика — обновляем last_student_message_at,
+        # но только если новое время ПОЗЖЕ старого (чтобы не откатывать назад)
+        if is_from_student:
+            await session.execute(
+                update(Conversation)
+                .where(
+                    Conversation.id == conversation_id,
+                    (Conversation.last_student_message_at.is_(None))
+                    | (Conversation.last_student_message_at < timestamp),
+                )
+                .values(last_student_message_at=timestamp)
+            )
         await session.commit()
+
+
+async def get_conversations_for_reminder(threshold_seconds: int):
+    """Активные беседы, в которых ученик писал за последние threshold_seconds.
+    Возвращает list[Conversation]."""
+    threshold_ts = datetime.utcnow() - timedelta(seconds=threshold_seconds)
+    async with async_session_factory() as session:
+        result = await session.scalars(
+            select(Conversation).where(
+                Conversation.is_active.is_(True),
+                Conversation.last_student_message_at.isnot(None),
+                Conversation.last_student_message_at >= threshold_ts,
+            )
+        )
+        return list(result.all())
 
 
 async def get_messages_for_day(conversation_id: int, day: date) -> list[Message]:

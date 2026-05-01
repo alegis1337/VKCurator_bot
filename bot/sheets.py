@@ -17,20 +17,10 @@ HEADERS = [
     "Дата",
     "Беседа",
     "Задание",
-    "Статус",
     "Сообщений",
     "Участники",
     "Саммари",
-    "Вопросы без ответа",
-    "Заметки",
 ]
-
-STATUS_EMOJI = {
-    "выполнено": "✅ Выполнено",
-    "в процессе": "🔄 В процессе",
-    "не выполнено": "❌ Не выполнено",
-    "не было задания": "➖ Задания не было",
-}
 
 
 def _open_sheet():
@@ -50,16 +40,35 @@ def _open_sheet():
         worksheet.append_row(HEADERS)
         return worksheet
 
+    # Привести таблицу к новой схеме (могут быть остатки старых колонок:
+    # "Статус", "Вопросы без ответа", "Заметки")
+    _migrate_legacy_columns(worksheet)
+
     first_row = worksheet.row_values(1)
     if first_row != HEADERS:
-        worksheet.update("A1", [HEADERS])
+        worksheet.update(values=[HEADERS], range_name=f"A1:{chr(ord('A')+len(HEADERS)-1)}1")
 
     return worksheet
 
 
-def _format_status(status: str) -> str:
-    key = (status or "").strip().lower()
-    return STATUS_EMOJI.get(key, status or "")
+# Старая схема — для миграции
+_LEGACY_HEADERS = [
+    "Дата", "Беседа", "Задание", "Статус", "Сообщений",
+    "Участники", "Саммари", "Вопросы без ответа", "Заметки",
+]
+
+
+def _migrate_legacy_columns(worksheet) -> None:
+    """Если в таблице остался старый header, удаляем колонки которых нет в
+    новом HEADERS. Один раз при инициализации, безопасно."""
+    first_row = worksheet.row_values(1)
+    if first_row != _LEGACY_HEADERS:
+        return  # либо уже мигрировано, либо вообще другой формат
+    # Колонки 4 (Статус), 8 (Вопросы), 9 (Заметки) → удалить.
+    # Удаляем с конца, чтобы индексы не сбивались.
+    for col_idx in (9, 8, 4):
+        worksheet.delete_columns(col_idx)
+    logger.info("Sheets: migrated legacy schema, removed Status/Questions/Notes columns")
 
 
 def _row_from_summary(summary: dict) -> list[str]:
@@ -73,12 +82,9 @@ def _row_from_summary(summary: dict) -> list[str]:
         summary.get("date", ""),
         summary.get("conversation", ""),
         summary.get("task", ""),
-        _format_status(summary.get("status", "")),
         str(summary.get("messages_count", 0)),
         participants_str,
         summary.get("key_points", ""),
-        summary.get("unanswered_questions", ""),
-        summary.get("notes", ""),
     ]
 
 

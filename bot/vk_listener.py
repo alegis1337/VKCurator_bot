@@ -147,7 +147,8 @@ def build_bot(token: str, group_id: int, label: str = "") -> Bot:
                             bot_label, message.peer_id, title)
 
         sender_name = await _fetch_user_name(bot.api, message.from_id)
-        role = "curator" if message.from_id in get_curator_ids() else "student"
+        is_curator = message.from_id in get_curator_ids()
+        role = "curator" if is_curator else "student"
         await crud.upsert_participant(message.from_id, sender_name, role=role)
 
         ts = message.date if isinstance(message.date, datetime) else datetime.fromtimestamp(message.date)
@@ -160,6 +161,7 @@ def build_bot(token: str, group_id: int, label: str = "") -> Bot:
             sender_name=sender_name,
             text=message.text or "",
             timestamp=ts,
+            is_from_student=not is_curator,
         )
 
     return bot
