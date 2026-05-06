@@ -71,5 +71,13 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     # Когда мы уже алертили главного куратора по этому сообщению (NULL = ещё нет)
     alerted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Сообщение от куратора типа "отвечу позже" без указания конкретного времени
+    is_delayed_response: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Когда напомнили куратору про этот "отложенный" ответ (NULL = ещё нет)
+    delayed_alerted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Для сообщений ученика: требуется ли ответ куратора?
+    # NULL = ещё не классифицировано (по умолчанию считаем что требует),
+    # True = вопрос/просьба, False = отчёт/констатация/благодарность.
+    requires_response: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")

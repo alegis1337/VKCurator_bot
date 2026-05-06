@@ -97,7 +97,7 @@ async def save_message(
     text: str | None,
     timestamp: datetime,
     is_from_student: bool = False,
-) -> None:
+) -> Message:
     async with async_session_factory() as session:
         msg = Message(
             conversation_id=conversation_id,
@@ -121,6 +121,8 @@ async def save_message(
                 .values(last_student_message_at=timestamp)
             )
         await session.commit()
+        await session.refresh(msg)
+        return msg
 
 
 async def get_conversations_for_reminder(threshold_seconds: int):
@@ -224,13 +226,17 @@ async def find_unanswered_student_messages(
                     last_curator_ts = m.timestamp
 
             # самое раннее сообщение ученика после last_curator_ts,
-            # старше threshold, ещё не алертенное
+            # старше threshold, ещё не алертенное, требующее ответа
             for m in msgs:
                 if m.sender_id in curator_ids:
                     continue
                 if last_curator_ts and m.timestamp <= last_curator_ts:
                     continue
                 if m.alerted_at is not None:
+                    continue
+                # Если классификатор уже отметил, что ответ не нужен — пропускаем.
+                # NULL = ещё не классифицировано → считаем что нужен (safe default).
+                if m.requires_response is False:
                     continue
                 if m.timestamp > threshold_ts:
                     # сообщение слишком свежее, ждём
@@ -251,6 +257,88 @@ async def mark_message_alerted(message_id: int) -> None:
             .values(alerted_at=datetime.utcnow())
         )
         await session.commit()
+
+
+async def mark_message_delayed(message_id: int) -> None:
+    """Помечает сообщение куратора как «отвечу позже» (асинхронный фоновый
+    update после классификатора)."""
+    async with async_session_factory() as session:
+        await session.execute(
+            update(Message)
+            .where(Message.id == message_id)
+            .values(is_delayed_response=True)
+        )
+        await session.commit()
+
+
+async def mark_message_requires_response(message_id: int, value: bool) -> None:
+    """Помечает сообщение ученика: True = требует ответа, False = можно
+    проигнорировать (отчёт/благодарность/констатация). Вызывается из
+    фонового классификатора в vk_listener."""
+    async with async_session_factory() as session:
+        await session.execute(
+            update(Message)
+            .where(Message.id == message_id)
+            .values(requires_response=value)
+        )
+        await session.commit()
+
+
+async def mark_delayed_alerted(message_id: int) -> None:
+    async with async_session_factory() as session:
+        await session.execute(
+            update(Message)
+            .where(Message.id == message_id)
+            .values(delayed_alerted_at=datetime.utcnow())
+        )
+        await session.commit()
+
+
+async def find_pending_delayed_responses(threshold_seconds: int):
+    """Сообщения куратора с is_delayed_response=True, старше threshold,
+    delayed_alerted_at IS NULL, и в той же беседе после этого ТОТ ЖЕ куратор
+    больше ничего не писал.
+
+    Возвращает list[(Conversation, Message)]."""
+    threshold_ts = datetime.utcnow() - timedelta(seconds=threshold_seconds)
+
+    async with async_session_factory() as session:
+        candidates = (
+            await session.execute(
+                select(Message, Conversation)
+                .join(Conversation, Conversation.id == Message.conversation_id)
+                .where(
+                    Conversation.is_active.is_(True),
+                    Message.is_delayed_response.is_(True),
+                    Message.delayed_alerted_at.is_(None),
+                    Message.timestamp <= threshold_ts,
+                )
+                .order_by(Message.timestamp.asc())
+            )
+        ).all()
+
+        result = []
+        for msg, conv in candidates:
+            # Не алертим если ТОТ ЖЕ куратор написал что-то ещё в этой беседе
+            # после "отвечу позже" — значит он уже ответил.
+            later_from_same = await session.scalar(
+                select(Message.id).where(
+                    Message.conversation_id == conv.id,
+                    Message.sender_id == msg.sender_id,
+                    Message.timestamp > msg.timestamp,
+                ).limit(1)
+            )
+            if later_from_same is not None:
+                # Считаем что ответил, помечаем чтобы не проверять снова.
+                await session.execute(
+                    update(Message)
+                    .where(Message.id == msg.id)
+                    .values(delayed_alerted_at=datetime.utcnow())
+                )
+                continue
+            result.append((conv, msg))
+        await session.commit()
+        return result
 
 
 async def upsert_participant(
