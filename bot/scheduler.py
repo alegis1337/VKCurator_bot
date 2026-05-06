@@ -7,7 +7,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 import pytz
 
 from bot.config import get_curator_ids, get_today_local
-from bot.notifier import Notifier, check_and_alert, send_daily_reminders
+from bot.notifier import Notifier, check_and_alert, check_delayed_responses, send_daily_reminders
 from bot.sheets import append_summary
 from bot.summarizer import generate_summary
 from db import crud
@@ -105,9 +105,20 @@ def build_scheduler(
             IntervalTrigger(minutes=alert_minutes, timezone=tz),
             id="alert_check",
             replace_existing=True,
-            kwargs={"notifier": notifier},
+            kwargs={"notifier": notifier, "bots": bots},
         )
         logger.info("Alert checker registered: every %d min", alert_minutes)
+
+    delayed_minutes = int(os.getenv("DELAYED_CHECK_INTERVAL_MIN", "10"))
+    if notifier is not None and delayed_minutes > 0:
+        scheduler.add_job(
+            check_delayed_responses,
+            IntervalTrigger(minutes=delayed_minutes, timezone=tz),
+            id="delayed_check",
+            replace_existing=True,
+            kwargs={"notifier": notifier},
+        )
+        logger.info("Delayed-response checker registered: every %d min", delayed_minutes)
 
     logger.info(
         "Scheduler configured: summary=%02d:%02d cleanup=%02d:%02d reminder=%02d:%02d tz=%s",

@@ -5,6 +5,7 @@ from datetime import datetime
 from vkbottle import API, Bot
 from vkbottle.bot import Message
 
+from bot.classifier import is_delayed_response, requires_response
 from bot.config import get_curator_ids, get_head_curator_id, get_today_local
 from db import crud
 
@@ -154,7 +155,7 @@ def build_bot(token: str, group_id: int, label: str = "") -> Bot:
         ts = message.date if isinstance(message.date, datetime) else datetime.fromtimestamp(message.date)
         if ts.tzinfo is not None:
             ts = ts.replace(tzinfo=None)
-        await crud.save_message(
+        saved = await crud.save_message(
             conversation_id=conv.id,
             vk_message_id=message.conversation_message_id or message.id,
             sender_id=message.from_id,
@@ -163,6 +164,38 @@ def build_bot(token: str, group_id: int, label: str = "") -> Bot:
             timestamp=ts,
             is_from_student=not is_curator,
         )
+
+        # Если это сообщение от куратора — в фоне проверяем "отвечу позже".
+        # Не блокируем основной поток; результат запишется в БД позже.
+        if is_curator and saved.text:
+            asyncio.create_task(_classify_curator_message(saved.id, saved.text))
+        # Если от ученика — в фоне классифицируем, требуется ли ответ.
+        # Отчёты, благодарности, констатации не должны триггерить алерты.
+        elif not is_curator and saved.text:
+            asyncio.create_task(_classify_student_message(saved.id, saved.text))
+
+    async def _classify_curator_message(msg_id: int, text: str) -> None:
+        try:
+            if await is_delayed_response(text):
+                await crud.mark_message_delayed(msg_id)
+                logger.info("Message %s flagged as delayed-response", msg_id)
+        except Exception as exc:
+            logger.warning(
+                "Classifier failed for msg_id=%s: %s: %s",
+                msg_id, type(exc).__name__, exc,
+            )
+
+    async def _classify_student_message(msg_id: int, text: str) -> None:
+        try:
+            needs = await requires_response(text)
+            await crud.mark_message_requires_response(msg_id, needs)
+            if not needs:
+                logger.info("Message %s flagged as NOT requiring response", msg_id)
+        except Exception as exc:
+            logger.warning(
+                "requires_response classifier failed for msg_id=%s: %s: %s",
+                msg_id, type(exc).__name__, exc,
+            )
 
     return bot
 
