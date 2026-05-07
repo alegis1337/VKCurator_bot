@@ -1,11 +1,18 @@
 import asyncio
 import logging
 import os
+from datetime import datetime
 
 import gspread
 from google.oauth2.service_account import Credentials
 
 logger = logging.getLogger(__name__)
+
+_WEEKDAYS_RU = [
+    "понедельник", "вторник", "среда", "четверг",
+    "пятница", "суббота", "воскресенье",
+]
+_SEPARATOR_PREFIX = "📅"
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -88,11 +95,72 @@ def _row_from_summary(summary: dict) -> list[str]:
     ]
 
 
+def _date_separator_label(date_str: str) -> str:
+    """Возвращает текст разделительной строки: '📅 Четверг, 07.05.2026'."""
+    try:
+        dt = datetime.strptime(date_str, "%d.%m.%Y")
+        weekday = _WEEKDAYS_RU[dt.weekday()].capitalize()
+        return f"{_SEPARATOR_PREFIX} {weekday}, {date_str}"
+    except (ValueError, IndexError):
+        return f"{_SEPARATOR_PREFIX} {date_str}"
+
+
+def _last_data_date(worksheet) -> str | None:
+    """Дата (col A) последней реальной строки (не заголовка, не разделителя)."""
+    col = worksheet.col_values(1)
+    # col[0] — header "Дата"
+    for value in reversed(col[1:]):
+        if not value:
+            continue
+        if value.startswith(_SEPARATOR_PREFIX):
+            continue
+        return value
+    return None
+
+
+def _last_col_letter(n: int) -> str:
+    # Достаточно для n <= 26 (у нас 6 колонок)
+    return chr(ord("A") + n - 1)
+
+
+def _insert_date_separator(worksheet, date_str: str) -> None:
+    """Добавляет визуальный разделитель: жирная цветная объединённая строка
+    с датой и днём недели. Делает таблицу читаемой по дням."""
+    label = _date_separator_label(date_str)
+    sep_row = [label] + [""] * (len(HEADERS) - 1)
+    worksheet.append_row(sep_row, value_input_option="USER_ENTERED")
+    row_idx = len(worksheet.col_values(1))
+    last_col = _last_col_letter(len(HEADERS))
+    range_name = f"A{row_idx}:{last_col}{row_idx}"
+    try:
+        worksheet.merge_cells(range_name, merge_type="MERGE_ALL")
+    except Exception as exc:
+        logger.warning("Failed to merge separator cells %s: %s", range_name, exc)
+    try:
+        worksheet.format(range_name, {
+            "backgroundColor": {"red": 0.27, "green": 0.45, "blue": 0.77},
+            "textFormat": {
+                "bold": True,
+                "fontSize": 12,
+                "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0},
+            },
+            "horizontalAlignment": "LEFT",
+            "verticalAlignment": "MIDDLE",
+        })
+    except Exception as exc:
+        logger.warning("Failed to format separator row %d: %s", row_idx, exc)
+
+
 async def append_summary(summary: dict) -> None:
     row = _row_from_summary(summary)
+    new_date = row[0]
 
     def _append():
         worksheet = _open_sheet()
+        last_date = _last_data_date(worksheet)
+        # Перед первой записью нового дня — вставить разделитель
+        if new_date and last_date != new_date:
+            _insert_date_separator(worksheet, new_date)
         worksheet.append_row(row, value_input_option="USER_ENTERED")
 
     await asyncio.to_thread(_append)
