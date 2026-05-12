@@ -64,10 +64,16 @@ def main() -> None:
     for tok, gid in zip(tokens, group_ids):
         logger.info("  token...%s -> group_id=%s", tok[-8:], gid)
 
+    # Общий словарь api по group_id — нужен для команды /broadcast,
+    # чтобы любой бот мог отправлять сообщения в чаты других сообществ.
+    # Передаём по ссылке, заполняем сразу после создания всех ботов.
+    apis_by_group: dict = {}
     bots = [
-        build_bot(tok, gid, label=f"g{gid}")
+        build_bot(tok, gid, label=f"g{gid}", apis_by_group=apis_by_group)
         for tok, gid in zip(tokens, group_ids)
     ]
+    for b, gid in zip(bots, group_ids):
+        apis_by_group[gid] = b.api
     primary = bots[0]  # его loop_wrapper будет драйвером для всех
 
     notifier = Notifier(apis=[b.api for b in bots])
