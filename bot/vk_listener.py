@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 from datetime import datetime
 
 from vkbottle import API, Bot
@@ -12,7 +13,12 @@ from db import crud
 logger = logging.getLogger(__name__)
 
 
-def build_bot(token: str, group_id: int, label: str = "") -> Bot:
+def build_bot(
+    token: str,
+    group_id: int,
+    label: str = "",
+    apis_by_group: dict[int, API] | None = None,
+) -> Bot:
     if not token:
         raise RuntimeError("VK token is empty")
 
@@ -111,6 +117,66 @@ def build_bot(token: str, group_id: int, label: str = "") -> Bot:
         logger.info(
             "[%s] /sync: scanned=%d added=%d updated=%d",
             bot_label, scanned, added, updated,
+        )
+
+    @bot.on.chat_message(text=["/broadcast <text>", "/broadcast\n<text>"])
+    async def cmd_broadcast(message: Message, text: str):
+        """Рассылает одно сообщение во все активные беседы (по всем
+        сообществам). Только главный куратор. Использование:
+        `/broadcast Внимание! Завтра занятий не будет.` """
+        if not _is_head_curator(message.from_id):
+            return
+
+        body = (text or "").strip()
+        if not body:
+            await message.answer("Использование: /broadcast <текст сообщения>")
+            return
+
+        convs = await crud.get_active_conversations()
+        if not convs:
+            await message.answer("Нет активных бесед для рассылки.")
+            return
+
+        announce = f"📢 Объявление от куратора:\n\n{body}"
+        sent = 0
+        failed = 0
+        skipped = 0
+        for conv in convs:
+            api = None
+            if apis_by_group is not None:
+                api = apis_by_group.get(conv.vk_group_id)
+            if api is None and conv.vk_group_id == group_id:
+                api = bot.api
+            if api is None:
+                skipped += 1
+                logger.warning(
+                    "[%s] /broadcast: no API for group_id=%s (peer=%s)",
+                    bot_label, conv.vk_group_id, conv.vk_peer_id,
+                )
+                continue
+            try:
+                await api.messages.send(
+                    peer_id=conv.vk_peer_id,
+                    random_id=random.randint(-(2**31), 2**31 - 1),
+                    message=announce,
+                    disable_mentions=1,
+                )
+                sent += 1
+            except Exception as exc:
+                failed += 1
+                logger.warning(
+                    "[%s] /broadcast to peer=%s group=%s failed: %s: %s",
+                    bot_label, conv.vk_peer_id, conv.vk_group_id,
+                    type(exc).__name__, exc,
+                )
+
+        report = f"Рассылка завершена. Доставлено: {sent}. Ошибок: {failed}."
+        if skipped:
+            report += f" Пропущено (нет бота для группы): {skipped}."
+        await message.answer(report)
+        logger.info(
+            "[%s] /broadcast by head: total=%d sent=%d failed=%d skipped=%d",
+            bot_label, len(convs), sent, failed, skipped,
         )
 
     @bot.on.chat_message(text="/status")
